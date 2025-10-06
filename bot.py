@@ -1,5 +1,6 @@
 # bot.py
 import logging
+from datetime import datetime
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from config import BOT_TOKEN, ADMIN_USERNAME_LIST
@@ -104,7 +105,12 @@ class ScheduleBot:
     async def today(self, update: Update, context: ContextTypes.DEFAULT_TYPE = None):
         """Показывает расписание на сегодня"""
         try:
+            current_date = datetime.now()
+            logger.info(f"Запрос расписания на сегодня: {current_date}, день недели: {current_date.weekday()}")
+            
             schedule_text = schedule_manager.get_today_schedule()
+            
+        # Остальной код без изменений...
             
             # Определяем, откуда пришел запрос
             if hasattr(update, 'message') and update.message:

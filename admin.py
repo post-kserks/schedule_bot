@@ -61,6 +61,11 @@ class AdminPanel:
         
         data = query.data
         
+        # Очищаем состояние ожидания при любом возврате в меню или отмене
+        if data in ["admin_back_to_menu", "admin_back_to_schedule"]:
+            if user.id in self.waiting_for_event_data:
+                del self.waiting_for_event_data[user.id]
+        
         if data == "admin_list_events":
             await self._list_events(update, context)
         elif data == "admin_add_event":
@@ -238,16 +243,27 @@ class AdminPanel:
     async def _back_to_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Вернуться в главное меню"""
         query = update.callback_query
+        
+        # Очищаем состояние ожидания при возврате в меню
+        user_id = query.from_user.id
+        if user_id in self.waiting_for_event_data:
+            del self.waiting_for_event_data[user_id]
+            
         await self.admin_menu_from_query(query)
     
     async def _back_to_schedule(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Вернуться к основному расписанию"""
         query = update.callback_query
         
-        # Импортируем здесь, чтобы избежать циклического импорта
-        from bot import ScheduleBot
+        # Очищаем состояние ожидания при возврате к расписанию
+        user_id = query.from_user.id
+        if user_id in self.waiting_for_event_data:
+            del self.waiting_for_event_data[user_id]
         
         await query.edit_message_text("Возврат к основному расписанию...")
+        
+        # Импортируем здесь, чтобы избежать циклического импорта
+        from bot import ScheduleBot
         
         # Создаем временный экземпляр бота для доступа к методам клавиатуры
         temp_bot = ScheduleBot("dummy_token")
@@ -293,9 +309,22 @@ class AdminPanel:
         
         # Проверяем, находится ли пользователь в процессе диалога
         if user_id not in self.waiting_for_event_data:
+            # Если пользователь не в процессе добавления мероприятия, но написал сообщение,
+            # возможно, он пытается отменить операцию
+            if message_text.lower() in ['отмена', 'cancel', 'назад']:
+                await update.message.reply_text("Операция отменена.")
+                await self.admin_menu(update, context)
             return
         
         step_data = self.waiting_for_event_data[user_id]
+        
+        # Проверяем, не хочет ли пользователь отменить операцию
+        if message_text.lower() in ['отмена', 'cancel', 'назад']:
+            # Очищаем состояние
+            del self.waiting_for_event_data[user_id]
+            await update.message.reply_text("❌ Добавление мероприятия отменено.")
+            await self.admin_menu(update, context)
+            return
         
         if step_data["step"] == "waiting_for_date":
             # Проверяем формат даты
