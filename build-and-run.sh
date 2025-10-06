@@ -6,33 +6,31 @@
 if [ ! -f .env ]; then
     echo "Создаю .env файл из примера..."
     cp .env.example .env
-    echo "Пожалуйста, отредактируйте .env файл и добавьте BOT_TOKEN и ADMIN_USERNAME"
+    echo "⚠️  Пожалуйста, отредактируйте .env файл и добавьте BOT_TOKEN и ADMIN_USERNAMES"
+    echo "📝 Редактирование: nano .env"
     exit 1
 fi
 
-# Останавливаем и удаляем старый контейнер если он существует
-echo "Проверка существующих контейнеров..."
-if docker ps -a | grep -q schedule-bot; then
-    echo "Останавливаем и удаляем старый контейнер..."
-    docker stop schedule-bot >/dev/null 2>&1
-    docker rm schedule-bot >/dev/null 2>&1
+# Проверяем наличие необходимых переменных
+if ! grep -q "BOT_TOKEN" .env || grep -q "BOT_TOKEN=your_bot_token_here" .env; then
+    echo "❌ BOT_TOKEN не настроен в .env файле"
+    echo "📝 Получите токен у @BotFather и добавьте в .env"
+    exit 1
 fi
 
-# Собираем Docker образ
-echo "Сборка Docker образа..."
-docker build -t schedule-bot .
+echo "🚀 Запуск бота расписания..."
+echo "📦 Использование Docker Compose..."
 
-# Запускаем контейнер
-echo "Запуск контейнера..."
-docker run -d \
-    --name schedule-bot \
-    --restart unless-stopped \
-    --env-file .env \
-    -v $(pwd)/data:/app/data \
-    -v $(pwd)/logs:/app/logs \
-    schedule-bot
+# Запускаем с помощью docker-compose
+docker-compose down 2>/dev/null  # Останавливаем старые контейнеры
+docker-compose up -d --build
 
-echo "Бот запущен!"
-echo "Проверьте логи: docker logs -f schedule-bot"
-echo "Остановить бота: docker stop schedule-bot"
-echo "Перезапустить бота: docker restart schedule-bot"
+echo "✅ Бот запущен!"
+echo ""
+echo "📊 Команды управления:"
+echo "   docker-compose logs -f      - Просмотр логов"
+echo "   docker-compose down         - Остановка бота"
+echo "   docker-compose restart      - Перезапуск бота"
+echo "   docker-compose ps           - Статус контейнеров"
+echo ""
+echo "🐛 Для проверки работы отправьте боту команду /start"

@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  schedule-bot:
+    build: .
+    container_name: telegram-schedule-bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_USERNAMES=${ADMIN_USERNAMES}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    labels:
+      - "description=Telegram Schedule Bot"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from database import db; print('Health check passed')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
