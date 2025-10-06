@@ -2,7 +2,7 @@
 import logging
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from config import BOT_TOKEN, ADMIN_USERNAME
+from config import BOT_TOKEN, ADMIN_USERNAME_LIST
 from database import db
 from schedule import schedule_manager
 from notifier import Notifier
@@ -20,6 +20,10 @@ class ScheduleBot:
     def __init__(self, token: str):
         self.application = Application.builder().token(token).build()
         self.notifier = Notifier(self.application)
+    
+    def is_user_admin(self, username: str) -> bool:
+        """Проверяет, является ли пользователь администратором"""
+        return admin_panel.is_user_admin(username)
     
     def get_main_keyboard(self):
         """Возвращает основную клавиатуру с кнопками"""
@@ -53,7 +57,7 @@ class ScheduleBot:
             )
             
             # Выбираем клавиатуру в зависимости от прав пользователя
-            if user.username == ADMIN_USERNAME:
+            if self.is_user_admin(user.username):
                 keyboard = self.get_admin_keyboard()
                 welcome_text += "\n\n⚙️ Доступна админ-панель"
             else:
@@ -85,7 +89,7 @@ class ScheduleBot:
         # Определяем, откуда пришел запрос
         if hasattr(update, 'message') and update.message:
             user = update.effective_user
-            if user.username == ADMIN_USERNAME:
+            if self.is_user_admin(user.username):
                 keyboard = self.get_admin_keyboard()
             else:
                 keyboard = self.get_main_keyboard()
@@ -105,7 +109,7 @@ class ScheduleBot:
             # Определяем, откуда пришел запрос
             if hasattr(update, 'message') and update.message:
                 user = update.effective_user
-                if user.username == ADMIN_USERNAME:
+                if self.is_user_admin(user.username):
                     keyboard = self.get_admin_keyboard()
                 else:
                     keyboard = self.get_main_keyboard()
@@ -133,7 +137,7 @@ class ScheduleBot:
             # Определяем, откуда пришел запрос
             if hasattr(update, 'message') and update.message:
                 user = update.effective_user
-                if user.username == ADMIN_USERNAME:
+                if self.is_user_admin(user.username):
                     keyboard = self.get_admin_keyboard()
                 else:
                     keyboard = self.get_main_keyboard()
@@ -161,7 +165,7 @@ class ScheduleBot:
             # Определяем, откуда пришел запрос
             if hasattr(update, 'message') and update.message:
                 user = update.effective_user
-                if user.username == ADMIN_USERNAME:
+                if self.is_user_admin(user.username):
                     keyboard = self.get_admin_keyboard()
                 else:
                     keyboard = self.get_main_keyboard()
@@ -185,7 +189,7 @@ class ScheduleBot:
         """Команда для открытия админ-панели"""
         user = update.effective_user
         
-        if user.username != ADMIN_USERNAME:
+        if not self.is_user_admin(user.username):
             await update.message.reply_text("❌ У вас нет прав для доступа к админ-панели")
             return
         
@@ -195,6 +199,28 @@ class ScheduleBot:
         # Открываем админ-панель
         await admin_panel.admin_menu(update, context)
     
+    async def get_my_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показывает информацию о пользователе"""
+        user = update.effective_user
+        is_admin = self.is_user_admin(user.username)
+        
+        admin_status = "✅ Администратор" if is_admin else "❌ Обычный пользователь"
+        
+        message = (
+            f"👤 Ваши данные:\n"
+            f"🆔 ID: `{user.id}`\n"
+            f"📛 Username: @{user.username or 'не установлен'}\n"
+            f"📝 Имя: {user.first_name or ''} {user.last_name or ''}\n"
+            f"🔐 Статус: {admin_status}\n\n"
+        )
+        
+        if is_admin:
+            message += "Доступны функции админ-панели: управление мероприятиями"
+        else:
+            message += "Для получения прав администратора обратитесь к текущим админам"
+        
+        await update.message.reply_text(message, parse_mode='Markdown')
+    
     async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик текстовых сообщений (для кнопок)"""
         user = update.effective_user
@@ -203,7 +229,7 @@ class ScheduleBot:
         logger.info(f"Получено сообщение от {user.username}: {text}")
         
         # Сначала проверяем, находится ли пользователь в диалоге с админ-панелью
-        if user.username == ADMIN_USERNAME and user.id in admin_panel.waiting_for_event_data:
+        if self.is_user_admin(user.username) and user.id in admin_panel.waiting_for_event_data:
             await admin_panel.handle_admin_message(update, context)
             return
         
@@ -217,7 +243,7 @@ class ScheduleBot:
         elif text == "❓ Помощь":
             await self.help(update, context)
         elif text == "⚙️ Админ-панель":
-            if user.username == ADMIN_USERNAME:
+            if self.is_user_admin(user.username):
                 await self.admin(update, context)
             else:
                 await update.message.reply_text("❌ У вас нет прав для доступа к админ-панели")
@@ -241,6 +267,7 @@ class ScheduleBot:
         self.application.add_handler(CommandHandler("tomorrow", self.tomorrow_command))
         self.application.add_handler(CommandHandler("week", self.week_command))
         self.application.add_handler(CommandHandler("admin", self.admin_command))
+        self.application.add_handler(CommandHandler("myinfo", self.get_my_info))  # Новая команда
         
         # Обработчик callback запросов (для инлайн-кнопок)
         self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))

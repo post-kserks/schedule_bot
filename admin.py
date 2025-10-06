@@ -4,7 +4,7 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from database import db
-from config import ADMIN_USERNAME
+from config import ADMIN_USERNAME_LIST
 
 logger = logging.getLogger(__name__)
 
@@ -12,17 +12,28 @@ class AdminPanel:
     def __init__(self):
         self.waiting_for_event_data = {}
     
+    def is_user_admin(self, username: str) -> bool:
+        """Проверяет, является ли пользователь администратором"""
+        if not username:
+            return False
+        
+        # Проверка по username (без @)
+        clean_username = username.lstrip('@')
+        return clean_username in ADMIN_USERNAME_LIST
+    
     async def admin_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Главное меню админ-панели"""
-        if not self._is_admin(update):
-            if hasattr(update, 'message') and update.message:
-                await update.message.reply_text("❌ У вас нет прав для доступа к админ-панели")
+        user = update.effective_user
+        
+        if not self.is_user_admin(user.username):
+            await update.message.reply_text("❌ У вас нет прав для доступа к админ-панели")
             return
         
         keyboard = [
             [InlineKeyboardButton("📋 Список мероприятий", callback_data="admin_list_events")],
             [InlineKeyboardButton("➕ Добавить мероприятие", callback_data="admin_add_event")],
             [InlineKeyboardButton("❌ Удалить мероприятие", callback_data="admin_delete_event")],
+            [InlineKeyboardButton("👥 Список админов", callback_data="admin_list_admins")],
             [InlineKeyboardButton("⬅️ Назад к расписанию", callback_data="admin_back_to_schedule")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -43,7 +54,8 @@ class AdminPanel:
         query = update.callback_query
         await query.answer()
         
-        if not self._is_admin(update):
+        user = update.effective_user
+        if not self.is_user_admin(user.username):
             await query.edit_message_text("❌ У вас нет прав для доступа к админ-панели")
             return
         
@@ -55,6 +67,8 @@ class AdminPanel:
             await self._start_add_event(update, context)
         elif data == "admin_delete_event":
             await self._start_delete_event(update, context)
+        elif data == "admin_list_admins":
+            await self._list_admins(update, context)
         elif data.startswith("delete_event_"):
             event_id = int(data.split("_")[2])
             await self._confirm_delete_event(update, context, event_id)
@@ -92,6 +106,33 @@ class AdminPanel:
         
         await query.edit_message_text(
             events_text,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад", callback_data="admin_back_to_menu")]
+            ])
+        )
+    
+    async def _list_admins(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показывает список администраторов"""
+        query = update.callback_query
+        
+        if not ADMIN_USERNAME_LIST:
+            await query.edit_message_text(
+                "❌ Нет назначенных администраторов",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Назад", callback_data="admin_back_to_menu")]
+                ])
+            )
+            return
+        
+        admin_info = "👥 Список администраторов:\n\n"
+        
+        for i, username in enumerate(ADMIN_USERNAME_LIST, 1):
+            admin_info += f"{i}. @{username}\n"
+        
+        admin_info += f"\n📊 Всего администраторов: {len(ADMIN_USERNAME_LIST)}"
+        
+        await query.edit_message_text(
+            admin_info,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⬅️ Назад", callback_data="admin_back_to_menu")]
             ])
@@ -197,7 +238,7 @@ class AdminPanel:
     async def _back_to_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Вернуться в главное меню"""
         query = update.callback_query
-        await self.admin_menu(update, context)
+        await self.admin_menu_from_query(query)
     
     async def _back_to_schedule(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Вернуться к основному расписанию"""
@@ -212,7 +253,7 @@ class AdminPanel:
         temp_bot = ScheduleBot("dummy_token")
         user = query.from_user
         
-        if user.username == ADMIN_USERNAME:
+        if self.is_user_admin(user.username):
             keyboard = temp_bot.get_admin_keyboard()
         else:
             keyboard = temp_bot.get_main_keyboard()
@@ -223,12 +264,31 @@ class AdminPanel:
             reply_markup=keyboard
         )
     
+    async def admin_menu_from_query(self, query):
+        """Показать меню админа из callback query"""
+        keyboard = [
+            [InlineKeyboardButton("📋 Список мероприятий", callback_data="admin_list_events")],
+            [InlineKeyboardButton("➕ Добавить мероприятие", callback_data="admin_add_event")],
+            [InlineKeyboardButton("❌ Удалить мероприятие", callback_data="admin_delete_event")],
+            [InlineKeyboardButton("👥 Список админов", callback_data="admin_list_admins")],
+            [InlineKeyboardButton("⬅️ Назад к расписанию", callback_data="admin_back_to_schedule")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "⚙️ Панель администратора\n\n"
+            "Выберите действие:",
+            reply_markup=reply_markup
+        )
+    
     async def handle_admin_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик сообщений для админ-панели"""
-        if not self._is_admin(update):
+        user = update.effective_user
+        
+        if not self.is_user_admin(user.username):
             return
         
-        user_id = update.effective_user.id
+        user_id = user.id
         message_text = update.message.text
         
         # Проверяем, находится ли пользователь в процессе диалога
@@ -260,7 +320,7 @@ class AdminPanel:
                 step_data["date"],
                 step_data["subject"],
                 step_data["event_type"],
-                update.effective_user.username
+                user.username
             )
             
             if event_id:
@@ -278,11 +338,6 @@ class AdminPanel:
             
             # Возвращаем в админ-меню
             await self.admin_menu(update, context)
-    
-    def _is_admin(self, update: Update) -> bool:
-        """Проверяет, является ли пользователь администратором"""
-        user = update.effective_user
-        return user and user.username == ADMIN_USERNAME
 
 # Глобальный экземпляр админ-панели
 admin_panel = AdminPanel()
