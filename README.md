@@ -63,6 +63,9 @@ ADMIN_USERNAMES=username1,username2,username3
 ### Docker Compose (альтернативный способ)
 
 ```bash
+# Сборка и запуск в фоновом режиме
+docker-compose up --build -d
+
 # Запуск в фоновом режиме
 docker-compose up -d
 
