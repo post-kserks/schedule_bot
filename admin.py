@@ -1,4 +1,4 @@
-# admin.py
+# admin.py (исправленная версия)
 import logging
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 class AdminPanel:
     def __init__(self):
         self.waiting_for_event_data = {}
+        self.waiting_for_broadcast = set()  # Множество для отслеживания режима рассылки
     
     def is_user_admin(self, username: str) -> bool:
         """Проверяет, является ли пользователь администратором"""
@@ -33,6 +34,7 @@ class AdminPanel:
             [InlineKeyboardButton("📋 Список мероприятий", callback_data="admin_list_events")],
             [InlineKeyboardButton("➕ Добавить мероприятие", callback_data="admin_add_event")],
             [InlineKeyboardButton("❌ Удалить мероприятие", callback_data="admin_delete_event")],
+            [InlineKeyboardButton("📢 Сообщение всем", callback_data="admin_broadcast_message")],
             [InlineKeyboardButton("👥 Список админов", callback_data="admin_list_admins")],
             [InlineKeyboardButton("⬅️ Назад к расписанию", callback_data="admin_back_to_schedule")]
         ]
@@ -65,6 +67,8 @@ class AdminPanel:
         if data in ["admin_back_to_menu", "admin_back_to_schedule"]:
             if user.id in self.waiting_for_event_data:
                 del self.waiting_for_event_data[user.id]
+            if user.id in self.waiting_for_broadcast:
+                self.waiting_for_broadcast.discard(user.id)
         
         if data == "admin_list_events":
             await self._list_events(update, context)
@@ -74,6 +78,8 @@ class AdminPanel:
             await self._start_delete_event(update, context)
         elif data == "admin_list_admins":
             await self._list_admins(update, context)
+        elif data == "admin_broadcast_message":
+            await self._start_broadcast_message(update, context)
         elif data.startswith("delete_event_"):
             event_id = int(data.split("_")[2])
             await self._confirm_delete_event(update, context, event_id)
@@ -159,6 +165,19 @@ class AdminPanel:
             ])
         )
     
+    async def _start_broadcast_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Начать процесс отправки сообщения всем пользователям"""
+        query = update.callback_query
+        
+        # Добавляем пользователя в состояние ожидания рассылки
+        user_id = query.from_user.id
+        self.waiting_for_broadcast.add(user_id)
+        
+        await query.edit_message_text(
+            "📢 Отправка сообщения всем пользователям\n\n"
+            "Введите текст сообщения, которое будет отправлено всем пользователям бота:"
+        )
+    
     async def _start_delete_event(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Начать процесс удаления мероприятия"""
         query = update.callback_query
@@ -240,6 +259,39 @@ class AdminPanel:
                 ])
             )
     
+    async def _execute_broadcast_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE, message_text: str):
+        """Выполнить рассылку сообщения всем пользователям"""
+        try:
+            users = db.get_all_users()
+            
+            if not users:
+                await update.message.reply_text("❌ Нет пользователей для рассылки")
+                return
+            
+            success_count = 0
+            fail_count = 0
+            
+            for user_id in users:
+                try:
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=f"📢 Объявление:\n\n{message_text}"
+                    )
+                    success_count += 1
+                except Exception as e:
+                    logger.warning(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+                    fail_count += 1
+            
+            report_text = (
+                f"Сообщение успешно отправлено"
+            )
+            
+            await update.message.reply_text(report_text)
+            
+        except Exception as e:
+            logger.error(f"Ошибка при рассылке сообщений: {e}")
+            await update.message.reply_text("❌ Произошла ошибка при рассылке")
+    
     async def _back_to_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Вернуться в главное меню"""
         query = update.callback_query
@@ -247,7 +299,9 @@ class AdminPanel:
         # Очищаем состояние ожидания при возврате в меню
         user_id = query.from_user.id
         if user_id in self.waiting_for_event_data:
-            del self.waiting_for_event_data[user_id]
+            del self.waiting_for_event_data[user.id]
+        if user_id in self.waiting_for_broadcast:
+            self.waiting_for_broadcast.discard(user.id)
             
         await self.admin_menu_from_query(query)
     
@@ -258,7 +312,9 @@ class AdminPanel:
         # Очищаем состояние ожидания при возврате к расписанию
         user_id = query.from_user.id
         if user_id in self.waiting_for_event_data:
-            del self.waiting_for_event_data[user_id]
+            del self.waiting_for_event_data[user.id]
+        if user_id in self.waiting_for_broadcast:
+            self.waiting_for_broadcast.discard(user.id)
         
         await query.edit_message_text("Возврат к основному расписанию...")
         
@@ -286,6 +342,7 @@ class AdminPanel:
             [InlineKeyboardButton("📋 Список мероприятий", callback_data="admin_list_events")],
             [InlineKeyboardButton("➕ Добавить мероприятие", callback_data="admin_add_event")],
             [InlineKeyboardButton("❌ Удалить мероприятие", callback_data="admin_delete_event")],
+            [InlineKeyboardButton("📢 Сообщение всем", callback_data="admin_broadcast_message")],
             [InlineKeyboardButton("👥 Список админов", callback_data="admin_list_admins")],
             [InlineKeyboardButton("⬅️ Назад к расписанию", callback_data="admin_back_to_schedule")]
         ]
@@ -307,66 +364,69 @@ class AdminPanel:
         user_id = user.id
         message_text = update.message.text
         
-        # Проверяем, находится ли пользователь в процессе диалога
-        if user_id not in self.waiting_for_event_data:
-            # Если пользователь не в процессе добавления мероприятия, но написал сообщение,
-            # возможно, он пытается отменить операцию
+        # Если пользователь в состоянии рассылки
+        if user_id in self.waiting_for_broadcast:
+            # Удаляем из состояния рассылки
+            self.waiting_for_broadcast.discard(user_id)
+            # Выполняем рассылку
+            await self._execute_broadcast_message(update, context, message_text)
+            # Возвращаем в меню
+            await self.admin_menu(update, context)
+            return
+        
+        # Если пользователь в процессе добавления мероприятия
+        if user_id in self.waiting_for_event_data:
+            step_data = self.waiting_for_event_data[user_id]
+            
+            # Проверяем, не хочет ли пользователь отменить операцию
             if message_text.lower() in ['отмена', 'cancel', 'назад']:
-                await update.message.reply_text("Операция отменена.")
+                # Очищаем состояние
+                del self.waiting_for_event_data[user_id]
+                await update.message.reply_text("❌ Добавление мероприятия отменено.")
                 await self.admin_menu(update, context)
-            return
-        
-        step_data = self.waiting_for_event_data[user_id]
-        
-        # Проверяем, не хочет ли пользователь отменить операцию
-        if message_text.lower() in ['отмена', 'cancel', 'назад']:
-            # Очищаем состояние
-            del self.waiting_for_event_data[user_id]
-            await update.message.reply_text("❌ Добавление мероприятия отменено.")
-            await self.admin_menu(update, context)
-            return
-        
-        if step_data["step"] == "waiting_for_date":
-            # Проверяем формат даты
-            try:
-                datetime.strptime(message_text, "%Y-%m-%d")
-                step_data["date"] = message_text
-                step_data["step"] = "waiting_for_subject"
-                await update.message.reply_text("📚 Теперь введите название предмета:")
-            except ValueError:
-                await update.message.reply_text("❌ Неверный формат даты. Используйте ГГГГ-ММ-ДД:")
-        
-        elif step_data["step"] == "waiting_for_subject":
-            step_data["subject"] = message_text
-            step_data["step"] = "waiting_for_event_type"
-            await update.message.reply_text("🎯 Теперь введите тип мероприятия (например, 'контрольная работа', 'домашняя работа'):")
-        
-        elif step_data["step"] == "waiting_for_event_type":
-            step_data["event_type"] = message_text
+                return
             
-            # Сохраняем мероприятие в БД
-            event_id = db.add_control_event(
-                step_data["date"],
-                step_data["subject"],
-                step_data["event_type"],
-                user.username
-            )
+            if step_data["step"] == "waiting_for_date":
+                # Проверяем формат даты
+                try:
+                    datetime.strptime(message_text, "%Y-%m-%d")
+                    step_data["date"] = message_text
+                    step_data["step"] = "waiting_for_subject"
+                    await update.message.reply_text("📚 Теперь введите название предмета:")
+                except ValueError:
+                    await update.message.reply_text("❌ Неверный формат даты. Используйте ГГГГ-ММ-ДД:")
             
-            if event_id:
-                await update.message.reply_text(
-                    f"✅ Мероприятие успешно добавлено!\n\n"
-                    f"📅 Дата: {step_data['date']}\n"
-                    f"📚 Предмет: {step_data['subject']}\n"
-                    f"🎯 Тип: {step_data['event_type']}"
+            elif step_data["step"] == "waiting_for_subject":
+                step_data["subject"] = message_text
+                step_data["step"] = "waiting_for_event_type"
+                await update.message.reply_text("🎯 Теперь введите тип мероприятия (например, 'контрольная работа', 'домашняя работа'):")
+            
+            elif step_data["step"] == "waiting_for_event_type":
+                step_data["event_type"] = message_text
+                
+                # Сохраняем мероприятие в БД
+                event_id = db.add_control_event(
+                    step_data["date"],
+                    step_data["subject"],
+                    step_data["event_type"],
+                    user.username
                 )
-            else:
-                await update.message.reply_text("❌ Ошибка при добавлении мероприятия")
-            
-            # Очищаем состояние
-            del self.waiting_for_event_data[user_id]
-            
-            # Возвращаем в админ-меню
-            await self.admin_menu(update, context)
+                
+                if event_id:
+                    await update.message.reply_text(
+                        f"✅ Мероприятие успешно добавлено!\n\n"
+                        f"📅 Дата: {step_data['date']}\n"
+                        f"📚 Предмет: {step_data['subject']}\n"
+                        f"🎯 Тип: {step_data['event_type']}"
+                    )
+                else:
+                    await update.message.reply_text("❌ Ошибка при добавлении мероприятия")
+                
+                # Очищаем состояние
+                del self.waiting_for_event_data[user_id]
+                
+                # Возвращаем в админ-меню
+                await self.admin_menu(update, context)
 
 # Глобальный экземпляр админ-панели
 admin_panel = AdminPanel()

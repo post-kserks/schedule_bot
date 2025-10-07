@@ -227,6 +227,7 @@ class ScheduleBot:
         
         await update.message.reply_text(message, parse_mode='Markdown')
     
+    # bot.py (дополняем метод handle_text_message)
     async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик текстовых сообщений (для кнопок)"""
         user = update.effective_user
@@ -235,9 +236,11 @@ class ScheduleBot:
         logger.info(f"Получено сообщение от {user.username}: {text}")
         
         # Сначала проверяем, находится ли пользователь в диалоге с админ-панелью
-        if self.is_user_admin(user.username) and user.id in admin_panel.waiting_for_event_data:
-            await admin_panel.handle_admin_message(update, context)
-            return
+        if self.is_user_admin(user.username):
+            # Проверяем состояние добавления мероприятия или рассылки
+            if user.id in admin_panel.waiting_for_event_data or user.id in admin_panel.waiting_for_broadcast:
+                await admin_panel.handle_admin_message(update, context)
+                return
         
         # Затем обрабатываем обычные команды
         if text == "📅 Сегодня":
