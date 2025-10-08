@@ -1,8 +1,14 @@
-# test_bot.py
+# tests/test_bot.py
 import asyncio
 import logging
-from database import db
-from schedule import schedule_manager
+import sys
+import os
+
+# Добавляем корневую директорию в путь для импортов
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.services.database import db
+from src.services.schedule_manager import schedule_manager
 from datetime import datetime, timedelta
 
 logging.basicConfig(level=logging.INFO)
@@ -15,18 +21,15 @@ async def test_all_functionality():
     # 1. Тест базы данных
     print("1. Тестируем базу данных...")
     try:
-        # Добавляем тестовое событие
         test_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         event_id = db.add_control_event(test_date, "Математический анализ", "Контрольная работа", "test")
         
-        # Проверяем добавление
         events = db.get_control_events_by_date(test_date)
         if events:
             print("✅ База данных работает корректно")
         else:
             print("❌ Ошибка в работе базы данных")
         
-        # Удаляем тестовое событие
         db.delete_control_event(event_id)
     except Exception as e:
         print(f"❌ Ошибка тестирования БД: {e}")
@@ -61,7 +64,7 @@ async def test_all_functionality():
         subjects = schedule_manager.get_subjects_with_times()
         if subjects:
             print(f"✅ Получено {len(subjects)} предметов на сегодня")
-            for subj in subjects[:2]:  # Показываем первые 2
+            for subj in subjects[:2]:
                 print(f"   - {subj['name']} в {subj['start_time']}")
         else:
             print("❌ Не удалось получить предметы")

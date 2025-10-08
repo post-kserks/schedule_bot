@@ -1,17 +1,14 @@
-# database.py
+# services/database.py
 import sqlite3
 import logging
 import os
-from datetime import datetime
-from config import ADMIN_USERNAME
+from src.utils.config import ADMIN_USERNAME
 
 logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self, db_path="schedule.db"):
-        # Если путь не абсолютный, используем текущую директорию
         if not os.path.isabs(db_path):
-            # В Docker используем папку data, иначе текущую директорию
             if os.path.exists('/app/data'):
                 self.db_path = "/app/data/schedule.db"
             else:
@@ -19,7 +16,6 @@ class Database:
         else:
             self.db_path = db_path
         
-        # Создаем папку для БД если нужно (только если есть путь в db_path)
         db_dir = os.path.dirname(self.db_path)
         if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
@@ -34,7 +30,6 @@ class Database:
         """Инициализация базы данных"""
         try:
             with self.get_connection() as conn:
-                # Таблица для контрольных мероприятий
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS control_events (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +41,6 @@ class Database:
                     )
                 ''')
                 
-                # Таблица для пользователей
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS users (
                         user_id INTEGER PRIMARY KEY,
@@ -104,7 +98,7 @@ class Database:
             return False
     
     def get_all_control_events(self):
-        """Получение всех контрольных мероприятий (для админа)"""
+        """Получение всех контрольных мероприятий"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.execute('''

@@ -1,26 +1,23 @@
-# bot.py
+# handlers/user_handlers.py
 import logging
 from datetime import datetime
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from config import BOT_TOKEN, ADMIN_USERNAME_LIST
-from database import db
-from schedule import schedule_manager
-from notifier import Notifier
-from admin import admin_panel
+from telegram import Update, ReplyKeyboardRemove
+from src.utils.config import BOT_TOKEN
+from src.services.database import db
+from src.services.schedule_manager import schedule_manager
+from src.services.notifier import Notifier
+from src.services.admin_panel import admin_panel
+from src.utils.keyboards import get_main_keyboard, get_admin_keyboard
+from src.utils.helpers import setup_logging
 
-# Настройка логгера
 logger = logging.getLogger(__name__)
-
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
 
 class ScheduleBot:
     def __init__(self, token: str):
         self.application = Application.builder().token(token).build()
         self.notifier = Notifier(self.application)
+        setup_logging()
     
     def is_user_admin(self, username: str) -> bool:
         """Проверяет, является ли пользователь администратором"""
@@ -28,24 +25,14 @@ class ScheduleBot:
     
     def get_main_keyboard(self):
         """Возвращает основную клавиатуру с кнопками"""
-        keyboard = [
-            [KeyboardButton("📅 Сегодня"), KeyboardButton("📆 Завтра")],
-            [KeyboardButton("📅 Неделя"), KeyboardButton("❓ Помощь")]
-        ]
-        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        return get_main_keyboard()
     
     def get_admin_keyboard(self):
         """Возвращает клавиатуру для администратора"""
-        keyboard = [
-            [KeyboardButton("📅 Сегодня"), KeyboardButton("📆 Завтра")],
-            [KeyboardButton("📅 Неделя"), KeyboardButton("❓ Помощь")],
-            [KeyboardButton("⚙️ Админ-панель")]
-        ]
-        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        return get_admin_keyboard()
         
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
-            # Сохраняем пользователя в БД
             user = update.effective_user
             db.add_user(user.id, user.username, user.first_name, user.last_name)
             
@@ -57,7 +44,6 @@ class ScheduleBot:
                 "Используйте кнопки ниже для навигации:"
             )
             
-            # Выбираем клавиатуру в зависимости от прав пользователя
             if self.is_user_admin(user.username):
                 keyboard = self.get_admin_keyboard()
                 welcome_text += "\n\n⚙️ Доступна админ-панель"
@@ -87,7 +73,6 @@ class ScheduleBot:
 ⚙️ Админ-панель - Управление мероприятиями
         """
         
-        # Определяем, откуда пришел запрос
         if hasattr(update, 'message') and update.message:
             user = update.effective_user
             if self.is_user_admin(user.username):
@@ -110,9 +95,6 @@ class ScheduleBot:
             
             schedule_text = schedule_manager.get_today_schedule()
             
-        # Остальной код без изменений...
-            
-            # Определяем, откуда пришел запрос
             if hasattr(update, 'message') and update.message:
                 user = update.effective_user
                 if self.is_user_admin(user.username):
@@ -140,7 +122,6 @@ class ScheduleBot:
         try:
             schedule_text = schedule_manager.get_tomorrow_schedule()
             
-            # Определяем, откуда пришел запрос
             if hasattr(update, 'message') and update.message:
                 user = update.effective_user
                 if self.is_user_admin(user.username):
@@ -168,7 +149,6 @@ class ScheduleBot:
         try:
             week_schedule = schedule_manager.get_week_schedule()
             
-            # Определяем, откуда пришел запрос
             if hasattr(update, 'message') and update.message:
                 user = update.effective_user
                 if self.is_user_admin(user.username):
@@ -199,10 +179,7 @@ class ScheduleBot:
             await update.message.reply_text("❌ У вас нет прав для доступа к админ-панели")
             return
         
-        # Убираем обычную клавиатуру для админ-панели
-        await update.message.reply_text("Переход в админ-панель...", reply_markup=ReplyKeyboardRemove())
-        
-        # Открываем админ-панель
+        await update.message.reply_text("🔄 Переход в админ-панель...", reply_markup=ReplyKeyboardRemove())
         await admin_panel.admin_menu(update, context)
     
     async def get_my_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -227,74 +204,75 @@ class ScheduleBot:
         
         await update.message.reply_text(message, parse_mode='Markdown')
     
-    # bot.py (дополняем метод handle_text_message)
     async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик текстовых сообщений (для кнопок)"""
-        user = update.effective_user
-        text = update.message.text
-        
-        logger.info(f"Получено сообщение от {user.username}: {text}")
-        
-        # Сначала проверяем, находится ли пользователь в диалоге с админ-панелью
-        if self.is_user_admin(user.username):
-            # Проверяем состояние добавления мероприятия или рассылки
-            if user.id in admin_panel.waiting_for_event_data or user.id in admin_panel.waiting_for_broadcast:
-                await admin_panel.handle_admin_message(update, context)
-                return
-        
-        # Затем обрабатываем обычные команды
-        if text == "📅 Сегодня":
-            await self.today(update, context)
-        elif text == "📆 Завтра":
-            await self.tomorrow(update, context)
-        elif text == "📅 Неделя":
-            await self.week(update, context)
-        elif text == "❓ Помощь":
-            await self.help(update, context)
-        elif text == "⚙️ Админ-панель":
+        try:
+            user = update.effective_user
+            text = update.message.text
+            
+            logger.info(f"Получено сообщение от {user.username}: {text}")
+            
+            # Сначала проверяем, находится ли пользователь в диалоге с админ-панелью
             if self.is_user_admin(user.username):
-                await self.admin(update, context)
+                if user.id in admin_panel.waiting_for_event_data or user.id in admin_panel.waiting_for_broadcast:
+                    await admin_panel.handle_admin_message(update, context)
+                    return
+            
+            # Затем обрабатываем обычные команды
+            if text == "📅 Сегодня":
+                await self.today(update, context)
+            elif text == "📆 Завтра":
+                await self.tomorrow(update, context)
+            elif text == "📅 Неделя":
+                await self.week(update, context)
+            elif text == "❓ Помощь":
+                await self.help(update, context)
+            elif text == "⚙️ Админ-панель":
+                if self.is_user_admin(user.username):
+                    await self.admin(update, context)
+                else:
+                    await update.message.reply_text("❌ У вас нет прав для доступа к админ-панели")
             else:
-                await update.message.reply_text("❌ У вас нет прав для доступа к админ-панели")
-        else:
-            # Если сообщение не распознано, показываем помощь
-            await self.help(update, context)
+                # Если сообщение не распознано, показываем помощь
+                await self.help(update, context)
+        except Exception as e:
+            logger.error(f"Ошибка в handle_text_message: {e}")
+            await update.message.reply_text("❌ Произошла ошибка при обработке сообщения")
     
     async def handle_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик callback запросов от инлайн-кнопок"""
-        query = update.callback_query
-        await query.answer()
-        
-        # Передаем обработку в админ-панель
-        await admin_panel.handle_admin_callback(update, context)
+        try:
+            query = update.callback_query
+            await query.answer()
+            
+            # Передаем обработку в админ-панель
+            await admin_panel.handle_admin_callback(update, context)
+        except Exception as e:
+            logger.error(f"Ошибка в handle_callback_query: {e}")
+            try:
+                await update.callback_query.message.reply_text("❌ Произошла ошибка при обработке запроса")
+            except:
+                pass
     
-    def run(self):
-        # Регистрируем обработчики команд
+    def setup_handlers(self):
+        """Настраивает обработчики команд"""
         self.application.add_handler(CommandHandler("start", self.start))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("today", self.today_command))
         self.application.add_handler(CommandHandler("tomorrow", self.tomorrow_command))
         self.application.add_handler(CommandHandler("week", self.week_command))
         self.application.add_handler(CommandHandler("admin", self.admin_command))
-        self.application.add_handler(CommandHandler("myinfo", self.get_my_info))  # Новая команда
+        self.application.add_handler(CommandHandler("myinfo", self.get_my_info))
         
-        # Обработчик callback запросов (для инлайн-кнопок)
         self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))
-        
-        # Обработчик текстовых сообщений (для кнопок)
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_message))
-        
-        # Настраиваем регулярные задания
+    
+    def run(self):
+        """Запускает бота"""
+        self.setup_handlers()
         self.notifier.setup_jobs()
         
-        # Запускаем бота
-        self.application.run_polling()
         logger.info("Бот успешно запущен")
-
-if __name__ == '__main__':
-    try:
-        bot = ScheduleBot(BOT_TOKEN)
-        print("Бот запускается...")
-        bot.run()
-    except Exception as e:
-        print(f"Ошибка запуска: {e}")
+        print("🤖 Бот запущен и готов к работе!")
+        
+        self.application.run_polling()

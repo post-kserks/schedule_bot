@@ -2,14 +2,20 @@ services:
   schedule-bot:
     build: .
     container_name: telegram-schedule-bot
-    command: python bot.py
+    command: python main.py
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - ADMIN_USERNAMES=${ADMIN_USERNAMES}
-      - TZ=Europe/Moscow  # Добавьте эту строку
+      - TZ=Europe/Moscow
     volumes:
       - schedule_data:/app/data
+      - ./logs:/app/logs  # Добавляем монтирование логов
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   schedule_data:
