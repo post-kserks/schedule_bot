@@ -61,7 +61,7 @@ telegram-schedule-bot/
 
 ```bash
 # Клонируйте репозиторий
-git clone <repository-url>
+git clone https://github.com/post-kserks/schedule_bot.git
 cd telegram-schedule-bot
 
 # Запустите автоматическое развертывание
